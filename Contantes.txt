@@ -1,0 +1,61 @@
+==================================================
+CONSTANTES DEL SISTEMA DE VENTAS
+==================================================
+
+-------------------------
+CODIGOS
+-------------------------
+
+CODIGO_MIN = 1
+CODIGO_MAX = 999999
+CODIGO_INICIAL = 1001
+
+-------------------------
+PRODUCTOS
+-------------------------
+
+NOMBRE_MIN = 2
+NOMBRE_MAX = 50
+
+PRECIO_MIN = 0.10
+PRECIO_MAX = 10000.00
+
+STOCK_MIN = 0
+STOCK_MAX = 50000
+
+STOCK_CRITICO = 10
+
+-------------------------
+VENTAS
+-------------------------
+
+CANTIDAD_MIN = 1
+CANTIDAD_MAX = 1000
+
+ITEMS_MAX_VENTA = 100
+
+TOTAL_MAX_VENTA = 100000.00
+
+-------------------------
+USUARIOS
+-------------------------
+USUARIO_MIN = 4
+USUARIO_MAX = 20
+PASSWORD_MIN = 6
+PASSWORD_MAX = 30
+-------------------------
+REPORTES
+-------------------------
+DIAS_REPORTE_MIN = 1
+DIAS_REPORTE_MAX = 3650
+-------------------------
+FINANZAS
+-------------------------
+MONTO_MIN = 0.01
+MONTO_MAX = 1000000.00
+
+-------------------------
+BASE DE DATOS
+-------------------------
+
+REGISTROS_MAX = 100000
