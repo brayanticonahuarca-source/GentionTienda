@@ -115,4 +115,16 @@ public:
         ss << fixed << setprecision(2) << valor;
         return ss.str();
     }
+    static bool esNombreValido(const string& nombre)
+    {
+    try
+    {
+        validarNombre(nombre);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+    }
 };
