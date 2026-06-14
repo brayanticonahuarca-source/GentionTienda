@@ -1,216 +1,292 @@
 #pragma once
+
 #include <string>
-#include <iostream>
-#include <iomanip>
 #include <vector>
-#include <map>
-#include <ctime>
+#include <cctype>
+
 #include "Venta.h"
 #include "Finanzas.h"
-#include "Inventario.h"
+#include "Excepciones.h"
 
-// ============================================================
-//  Reporte  — clase base abstracta
-//  Herencia + clases abstractas + funciones virtuales
-// ============================================================
-class Reporte {
-protected:
-    std::string titulo;
-    std::string periodo;   // fecha o mes
+using namespace std;
 
-    static std::string fechaActual() {
-        std::time_t t = std::time(nullptr);
-        std::tm* tm = std::localtime(&t);
-        char buf[16];
-        std::strftime(buf, sizeof(buf), "%Y-%m-%d", tm);
-        return std::string(buf);
-    }
+//==================================================
+// ESTRUCTURA DE RESULTADO PARA REPORTES
+//==================================================
 
-    static std::string mesActual() {
-        std::time_t t = std::time(nullptr);
-        std::tm* tm = std::localtime(&t);
-        char buf[8];
-        std::strftime(buf, sizeof(buf), "%Y-%m", tm);
-        return std::string(buf);
-    }
-
-    void imprimirEncabezado() const {
-        int ancho = 60;
-        std::string borde(ancho, '=');
-        std::cout << "\n" << borde << "\n";
-        std::cout << std::setw((ancho + static_cast<int>(titulo.size())) / 2)
-                  << titulo << "\n";
-        std::cout << std::setw((ancho + static_cast<int>(periodo.size())) / 2)
-                  << periodo << "\n";
-        std::cout << borde << "\n";
-    }
-
-public:
-    Reporte(const std::string& titulo, const std::string& periodo)
-        : titulo(titulo), periodo(periodo) {}
-
-    virtual ~Reporte() = default;
-
-    // Interfaz abstracta obligatoria
-    virtual void generar(const std::vector<Venta>& ventas,
-                         const RegistroFinanciero& finanzas,
-                         const Inventario& inventario) = 0;
-
-    const std::string& getTitulo()  const { return titulo; }
-    const std::string& getPeriodo() const { return periodo; }
+struct ResumenReporte
+{
+    string titulo;
+    string periodo;
+    int cantidadVentas;
+    double totalVendido;
+    double totalGastos;
+    double totalInversiones;
+    double gananciaNeta;
 };
 
-// ============================================================
-//  ReporteDiario : public Reporte
-// ============================================================
-class ReporteDiario : public Reporte {
-private:
-    std::string fecha;
+//==================================================
+// CLASE ABSTRACTA REPORTE
+//==================================================
 
+class Reporte
+{
 public:
-    explicit ReporteDiario(const std::string& f = "")
-        : Reporte("REPORTE DIARIO", f.empty() ? fechaActual() : f),
-          fecha(f.empty() ? fechaActual() : f) {
-        // Validar formato YYYY-MM-DD basico
-        if (fecha.size() != 10 || fecha[4] != '-' || fecha[7] != '-')
-            throw FechaInvalidaException("Formato esperado: YYYY-MM-DD");
+
+    virtual ResumenReporte generar() const = 0;
+
+    virtual ~Reporte()
+    {
+    }
+};
+
+//==================================================
+// REPORTE DIARIO
+//==================================================
+
+class ReporteDiario : public Reporte
+{
+private:
+
+    const RegistroVentas& registroVentas;
+    const RegistroFinanciero& finanzas;
+    string fecha;
+
+    void validarFecha() const
+    {
+        if (fecha.size() != 10)
+        {
+            throw FechaInvalidaException(
+                "La fecha debe tener formato YYYY-MM-DD."
+            );
+        }
+
+        if (fecha[4] != '-' || fecha[7] != '-')
+        {
+            throw FechaInvalidaException(
+                "Formato de fecha invalido. Use YYYY-MM-DD."
+            );
+        }
+
+        for (int i = 0; i < 10; i++)
+        {
+            if (i == 4 || i == 7)
+            {
+                continue;
+            }
+
+            if (!isdigit(static_cast<unsigned char>(fecha[i])))
+            {
+                throw FechaInvalidaException(
+                    "La fecha solo debe contener numeros y guiones."
+                );
+            }
+        }
     }
 
-    void generar(const std::vector<Venta>& ventas,
-                 const RegistroFinanciero& finanzas,
-                 const Inventario& inventario) override {
-        imprimirEncabezado();
+    double calcularGastosDelDia() const
+    {
+        double total = 0.0;
 
-        // ── Ventas del dia ───────────────────────────────────
-        std::cout << "\n  VENTAS DEL DIA\n  " << std::string(56, '-') << "\n";
+        vector<Gasto> gastos = finanzas.obtenerGastos();
+
+        for (const Gasto& gasto : gastos)
+        {
+            if (gasto.obtenerFecha() == fecha)
+            {
+                total += gasto.obtenerMonto();
+            }
+        }
+
+        return total;
+    }
+
+    double calcularInversionesDelDia() const
+    {
+        double total = 0.0;
+
+        vector<Inversion> inversiones = finanzas.obtenerInversiones();
+
+        for (const Inversion& inversion : inversiones)
+        {
+            if (inversion.obtenerFecha() == fecha)
+            {
+                total += inversion.obtenerMonto();
+            }
+        }
+
+        return total;
+    }
+
+public:
+
+    ReporteDiario(
+        const RegistroVentas& registro,
+        const RegistroFinanciero& registroFinanciero,
+        const string& fechaReporte
+    )
+        : registroVentas(registro),
+          finanzas(registroFinanciero),
+          fecha(fechaReporte)
+    {
+        validarFecha();
+    }
+
+    ResumenReporte generar() const override
+    {
+        vector<Venta> ventasDelDia =
+            registroVentas.obtenerVentasPorFecha(fecha);
+
+        ResumenReporte resumen;
+
+        resumen.titulo = "Reporte Diario";
+        resumen.periodo = fecha;
+        resumen.cantidadVentas = static_cast<int>(ventasDelDia.size());
+        resumen.totalVendido = registroVentas.calcularTotalPorFecha(fecha);
+        resumen.totalGastos = calcularGastosDelDia();
+        resumen.totalInversiones = calcularInversionesDelDia();
+
+        resumen.gananciaNeta =
+            resumen.totalVendido
+            - resumen.totalGastos
+            - resumen.totalInversiones;
+
+        return resumen;
+    }
+};
+
+//==================================================
+// REPORTE MENSUAL
+//==================================================
+
+class ReporteMensual : public Reporte
+{
+private:
+
+    const RegistroVentas& registroVentas;
+    const RegistroFinanciero& finanzas;
+    string mes; // formato YYYY-MM
+
+    void validarMes() const
+    {
+        if (mes.size() != 7)
+        {
+            throw FechaInvalidaException(
+                "El mes debe tener formato YYYY-MM."
+            );
+        }
+
+        if (mes[4] != '-')
+        {
+            throw FechaInvalidaException(
+                "Formato de mes invalido. Use YYYY-MM."
+            );
+        }
+
+        for (int i = 0; i < 7; i++)
+        {
+            if (i == 4)
+            {
+                continue;
+            }
+
+            if (!isdigit(static_cast<unsigned char>(mes[i])))
+            {
+                throw FechaInvalidaException(
+                    "El mes solo debe contener numeros y guion."
+                );
+            }
+        }
+    }
+
+    double calcularGastosDelMes() const
+    {
+        double total = 0.0;
+
+        vector<Gasto> gastos = finanzas.obtenerGastos();
+
+        for (const Gasto& gasto : gastos)
+        {
+            string fechaGasto = gasto.obtenerFecha();
+
+            if (fechaGasto.size() >= 7 &&
+                fechaGasto.substr(0, 7) == mes)
+            {
+                total += gasto.obtenerMonto();
+            }
+        }
+
+        return total;
+    }
+
+    double calcularInversionesDelMes() const
+    {
+        double total = 0.0;
+
+        vector<Inversion> inversiones = finanzas.obtenerInversiones();
+
+        for (const Inversion& inversion : inversiones)
+        {
+            string fechaInversion = inversion.obtenerFecha();
+
+            if (fechaInversion.size() >= 7 &&
+                fechaInversion.substr(0, 7) == mes)
+            {
+                total += inversion.obtenerMonto();
+            }
+        }
+
+        return total;
+    }
+
+public:
+
+    ReporteMensual(
+        const RegistroVentas& registro,
+        const RegistroFinanciero& registroFinanciero,
+        const string& mesReporte
+    )
+        : registroVentas(registro),
+          finanzas(registroFinanciero),
+          mes(mesReporte)
+    {
+        validarMes();
+    }
+
+    ResumenReporte generar() const override
+    {
+        vector<Venta> todasLasVentas =
+            registroVentas.obtenerVentas();
+
+        int cantidad = 0;
         double totalVentas = 0.0;
-        int    numVentas   = 0;
-        int    totalItems  = 0;
 
-        for (const Venta& v : ventas) {
-            if (v.getFecha() == fecha && v.estaFinalizada()) {
-                std::cout << "  " << v << "\n";
-                totalVentas += v.calcularTotal();
-                totalItems  += v.cantidadItems();
-                ++numVentas;
+        for (const Venta& venta : todasLasVentas)
+        {
+            string fechaVenta = venta.obtenerFecha();
+
+            if (fechaVenta.size() >= 7 &&
+                fechaVenta.substr(0, 7) == mes)
+            {
+                cantidad++;
+                totalVentas += venta.calcularTotal();
             }
         }
 
-        if (numVentas == 0) std::cout << "  (Sin ventas en esta fecha)\n";
+        ResumenReporte resumen;
 
-        // ── Movimientos financieros del dia ──────────────────
-        std::cout << "\n  MOVIMIENTOS FINANCIEROS\n  " << std::string(56, '-') << "\n";
-        auto movsDia = finanzas.filtrarPorFecha(fecha);
-        double ingresos = 0, egresos = 0;
-        for (MovimientoFinanciero* m : movsDia) {
-            std::cout << "  " << *m << "\n";
-            if (m->getSigno() == '+') ingresos += m->getMonto();
-            else                      egresos  += m->getMonto();
-        }
-        if (movsDia.empty()) std::cout << "  (Sin movimientos)\n";
+        resumen.titulo = "Reporte Mensual";
+        resumen.periodo = mes;
+        resumen.cantidadVentas = cantidad;
+        resumen.totalVendido = totalVentas;
+        resumen.totalGastos = calcularGastosDelMes();
+        resumen.totalInversiones = calcularInversionesDelMes();
 
-        // ── Resumen ──────────────────────────────────────────
-        std::cout << "\n  RESUMEN DEL DIA\n  " << std::string(56, '-') << "\n";
-        double gananciaNeta = totalVentas + ingresos - egresos;
+        resumen.gananciaNeta =
+            resumen.totalVendido
+            - resumen.totalGastos
+            - resumen.totalInversiones;
 
-        auto fila = [](const std::string& label, double val) {
-            std::cout << "  " << std::left << std::setw(28) << label
-                      << "S/ " << std::right << std::setw(10)
-                      << std::fixed << std::setprecision(2) << val << "\n";
-        };
-
-        fila("Ventas (" + std::to_string(numVentas) + " transacciones):", totalVentas);
-        fila("Inversiones/Ingresos:", ingresos);
-        fila("Gastos/Egresos:", egresos);
-        std::cout << "  " << std::string(42, '-') << "\n";
-        fila("GANANCIA NETA DEL DIA:", gananciaNeta);
-        std::cout << "  " << std::string(56, '=') << "\n\n";
-    }
-};
-
-// ============================================================
-//  ReporteMensual : public Reporte
-// ============================================================
-class ReporteMensual : public Reporte {
-private:
-    std::string mes; // "YYYY-MM"
-
-public:
-    explicit ReporteMensual(const std::string& m = "")
-        : Reporte("REPORTE MENSUAL", m.empty() ? mesActual() : m),
-          mes(m.empty() ? mesActual() : m) {
-        if (mes.size() != 7 || mes[4] != '-')
-            throw FechaInvalidaException("Formato esperado: YYYY-MM");
-    }
-
-    void generar(const std::vector<Venta>& ventas,
-                 const RegistroFinanciero& finanzas,
-                 const Inventario& inventario) override {
-        imprimirEncabezado();
-
-        // ── Ventas del mes ───────────────────────────────────
-        std::cout << "\n  RESUMEN DE VENTAS\n  " << std::string(56, '-') << "\n";
-        double totalVentas   = 0.0;
-        int    numVentas     = 0;
-        double ventaMaxima   = 0.0;
-        std::string diaMaximo;
-
-        // Conteo por dia para encontrar el dia con mas ventas
-        std::map<std::string, double> ventasPorDia;
-
-        for (const Venta& v : ventas) {
-            if (v.getFecha().find(mes) == 0 && v.estaFinalizada()) {
-                double tot = v.calcularTotal();
-                totalVentas += tot;
-                ++numVentas;
-                ventasPorDia[v.getFecha()] += tot;
-            }
-        }
-
-        for (const auto& par : ventasPorDia) {
-            if (par.second > ventaMaxima) {
-                ventaMaxima = par.second;
-                diaMaximo   = par.first;
-            }
-        }
-
-        // ── Movimientos del mes ──────────────────────────────
-        auto movsMes = finanzas.filtrarPorFecha(mes);
-        double inversiones = 0, gastos = 0;
-        for (MovimientoFinanciero* m : movsMes) {
-            if (m->getSigno() == '+') inversiones += m->getMonto();
-            else                      gastos      += m->getMonto();
-        }
-
-        // ── Inventario actual ────────────────────────────────
-        double valorInventario = inventario.calcularValorTotalInventario();
-
-        // ── Imprimir resumen ─────────────────────────────────
-        auto fila = [](const std::string& label, double val) {
-            std::cout << "  " << std::left << std::setw(32) << label
-                      << "S/ " << std::right << std::setw(12)
-                      << std::fixed << std::setprecision(2) << val << "\n";
-        };
-
-        std::cout << "  Transacciones del mes: " << numVentas << "\n";
-        if (!diaMaximo.empty())
-            std::cout << "  Mejor dia: " << diaMaximo
-                      << " (S/ " << std::fixed << std::setprecision(2) << ventaMaxima << ")\n";
-
-        std::cout << "\n  ESTADO FINANCIERO\n  " << std::string(56, '-') << "\n";
-        fila("Ingresos por ventas:", totalVentas);
-        fila("Inversiones recibidas:", inversiones);
-        fila("Gastos del mes:", gastos);
-        std::cout << "  " << std::string(48, '-') << "\n";
-        double gananciaNeta = totalVentas + inversiones - gastos;
-        fila("GANANCIA NETA DEL MES:", gananciaNeta);
-
-        std::cout << "\n  VALOR ACTUAL DEL INVENTARIO\n  " << std::string(56, '-') << "\n";
-        fila("Valor en stock:", valorInventario);
-
-        std::cout << "\n  PRODUCTOS CON BAJO STOCK\n  " << std::string(56, '-') << "\n";
-        inventario.listarConStockBajo(5);
-
-        std::cout << "  " << std::string(56, '=') << "\n\n";
+        return resumen;
     }
 };
