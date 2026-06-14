@@ -1,191 +1,491 @@
 #pragma once
+
 #include <vector>
 #include <string>
-#include <iostream>
-#include <iomanip>
 #include <ctime>
-#include "Validador.h"
-#include "Inventario.h"
 
-// ============================================================
-//  DetalleVenta  — una linea del ticket de venta
-// ============================================================
-class DetalleVenta {
+#include "Inventario.h"
+#include "Producto.h"
+#include "Validador.h"
+#include "Excepciones.h"
+
+using namespace std;
+
+const int VENDEDOR_MIN = 2;
+const int VENDEDOR_MAX = 40;
+const int ITEMS_MAX_VENTA = 100;
+const double TOTAL_MAX_VENTA = 100000.00;
+
+class DetalleVenta
+{
 private:
-    int         codigoProducto;
-    std::string nombreProducto;
-    int         cantidad;
-    double      precioUnitario;
+    int codigoProducto;
+    string nombreProducto;
+    int cantidad;
+    double precioUnitario;
 
 public:
-    DetalleVenta(int codProd, const std::string& nombre, int cant, double precio)
-        : codigoProducto(codProd), nombreProducto(nombre),
-          cantidad(cant), precioUnitario(precio) {
-        ValidadorProducto::validarCantidad(cant);
-        ValidadorProducto::validarPrecio(precio);
+    DetalleVenta(
+        int codigoProductoVenta,
+        const string& nombreProductoVenta,
+        int cantidadVenta,
+        double precioVenta
+    )
+    {
+        if (codigoProductoVenta <= 0)
+        {
+            throw CodigoInvalidoException(
+                "El codigo del producto debe ser mayor que cero."
+            );
+        }
+
+        string nombreNormalizado =
+            ValidadorProducto::normalizarNombre(nombreProductoVenta);
+
+        ValidadorProducto::validarNombre(nombreNormalizado);
+        ValidadorProducto::validarCantidad(cantidadVenta);
+        ValidadorProducto::validarPrecio(precioVenta);
+
+        codigoProducto = codigoProductoVenta;
+        nombreProducto = nombreNormalizado;
+        cantidad = cantidadVenta;
+        precioUnitario = precioVenta;
     }
 
-    int         getCodigoProducto()  const { return codigoProducto;  }
-    const std::string& getNombre()   const { return nombreProducto;  }
-    int         getCantidad()        const { return cantidad;         }
-    double      getPrecioUnitario()  const { return precioUnitario;   }
-    double      getSubtotal()        const { return precioUnitario * cantidad; }
-
-    // Sobrecarga de operador suma: acumular subtotales
-    double operator+(double acumulado) const {
-        return acumulado + getSubtotal();
+    int obtenerCodigoProducto() const
+    {
+        return codigoProducto;
     }
 
-    friend std::ostream& operator<<(std::ostream& os, const DetalleVenta& d) {
-        os << std::left
-           << std::setw(30) << d.nombreProducto
-           << std::setw(6)  << d.cantidad
-           << "x S/ " << std::setw(8) << std::fixed << std::setprecision(2) << d.precioUnitario
-           << "= S/ " << std::fixed << std::setprecision(2) << d.getSubtotal();
-        return os;
+    string obtenerNombreProducto() const
+    {
+        return nombreProducto;
+    }
+
+    int obtenerCantidad() const
+    {
+        return cantidad;
+    }
+
+    double obtenerPrecioUnitario() const
+    {
+        return precioUnitario;
+    }
+
+    double obtenerSubtotal() const
+    {
+        return precioUnitario * cantidad;
+    }
+
+    void aumentarCantidad(int cantidadExtra, int stockDisponible)
+    {
+        ValidadorProducto::validarCantidad(cantidadExtra);
+
+        int nuevaCantidad = cantidad + cantidadExtra;
+
+        if (nuevaCantidad > ValidadorProducto::CANTIDAD_MAX)
+        {
+            throw CantidadInvalidaException(
+                "La cantidad supera el maximo permitido por venta."
+            );
+        }
+
+        if (nuevaCantidad > stockDisponible)
+        {
+            throw StockInsuficienteException(
+                "Stock insuficiente para aumentar la cantidad."
+            );
+        }
+
+        cantidad = nuevaCantidad;
     }
 };
 
-// ============================================================
-//  Venta  — cabecera + lista de detalles
-//  Integrante 2 – Ventas
-// ============================================================
-class Venta {
+class Venta
+{
 private:
-    static int siguienteId;
+    inline static int siguienteId = 1;
 
-    int                    id;
-    std::vector<DetalleVenta> detalles;
-    std::string            fecha;         // "YYYY-MM-DD"
-    std::string            hora;          // "HH:MM:SS"
-    std::string            vendedor;
-    bool                   finalizada;
+    int id;
+    vector<DetalleVenta> detalles;
+    string fecha;
+    string hora;
+    string vendedor;
+    bool finalizada;
 
-    static std::string fechaHoraActual(bool soloFecha = false) {
-        std::time_t t = std::time(nullptr);
-        std::tm*    tm = std::localtime(&t);
-        char buf[32];
-        if (soloFecha)
-            std::strftime(buf, sizeof(buf), "%Y-%m-%d", tm);
-        else
-            std::strftime(buf, sizeof(buf), "%H:%M:%S", tm);
-        return std::string(buf);
+    static string obtenerFechaActual()
+    {
+        time_t tiempoActual = time(nullptr);
+        tm tiempoLocal;
+
+#ifdef _WIN32
+        localtime_s(&tiempoLocal, &tiempoActual);
+#else
+        localtime_r(&tiempoActual, &tiempoLocal);
+#endif
+
+        char buffer[11];
+        strftime(buffer, sizeof(buffer), "%Y-%m-%d", &tiempoLocal);
+
+        return string(buffer);
+    }
+
+    static string obtenerHoraActual()
+    {
+        time_t tiempoActual = time(nullptr);
+        tm tiempoLocal;
+
+#ifdef _WIN32
+        localtime_s(&tiempoLocal, &tiempoActual);
+#else
+        localtime_r(&tiempoActual, &tiempoLocal);
+#endif
+
+        char buffer[9];
+        strftime(buffer, sizeof(buffer), "%H:%M:%S", &tiempoLocal);
+
+        return string(buffer);
+    }
+
+    static void validarVendedor(const string& nombreVendedor)
+    {
+        string vendedorLimpio =
+            ValidadorProducto::trim(nombreVendedor);
+
+        if (vendedorLimpio.empty())
+        {
+            throw VentaException(
+                "El vendedor no puede estar vacio."
+            );
+        }
+
+        if ((int)vendedorLimpio.size() < VENDEDOR_MIN)
+        {
+            throw VentaException(
+                "El nombre del vendedor es demasiado corto."
+            );
+        }
+
+        if ((int)vendedorLimpio.size() > VENDEDOR_MAX)
+        {
+            throw VentaException(
+                "El nombre del vendedor es demasiado largo."
+            );
+        }
+    }
+
+    void validarNoFinalizada() const
+    {
+        if (finalizada)
+        {
+            throw VentaFinalizadaException(
+                "No se puede modificar una venta finalizada."
+            );
+        }
+    }
+
+    void validarLimiteItems() const
+    {
+        if ((int)detalles.size() >= ITEMS_MAX_VENTA)
+        {
+            throw VentaException(
+                "La venta supera el limite maximo de productos."
+            );
+        }
+    }
+
+    void validarTotalMaximo(double total) const
+    {
+        if (total > TOTAL_MAX_VENTA)
+        {
+            throw VentaException(
+                "La venta supera el total maximo permitido."
+            );
+        }
     }
 
 public:
-    explicit Venta(const std::string& vendedor)
-        : id(siguienteId++), fecha(fechaHoraActual(true)),
-          hora(fechaHoraActual(false)), vendedor(vendedor), finalizada(false) {
-        if (vendedor.empty())
-            throw VentaException("El nombre del vendedor no puede estar vacio");
+    Venta(const string& nombreVendedor)
+    {
+        string vendedorLimpio =
+            ValidadorProducto::trim(nombreVendedor);
+
+        validarVendedor(vendedorLimpio);
+
+        id = siguienteId++;
+        fecha = obtenerFechaActual();
+        hora = obtenerHoraActual();
+        vendedor = vendedorLimpio;
+        finalizada = false;
     }
 
-    // Constructor de recarga desde BD
-    Venta(int id, const std::string& vendedor, const std::string& fecha, const std::string& hora)
-        : id(id), fecha(fecha), hora(hora), vendedor(vendedor), finalizada(true) {
-        if (id >= siguienteId) siguienteId = id + 1;
-    }
+    void agregarDetalle(
+        Inventario& inventario,
+        int codigoProducto,
+        int cantidad
+    )
+    {
+        validarNoFinalizada();
 
-    ~Venta() = default;
-
-    // ── Construccion de la venta ─────────────────────────────
-    void agregarDetalle(Inventario& inv, int codigoProducto, int cantidad) {
-        if (finalizada)
-            throw VentaException("No se pueden agregar items a una venta ya finalizada");
-
-        Producto* p = inv.buscarPorCodigo(codigoProducto); // lanza si no existe
         ValidadorProducto::validarCantidad(cantidad);
 
-        if (cantidad > p->getStock())
-            throw StockInsuficienteException(p->getStock(), cantidad);
+        Producto* producto =
+            inventario.buscarPorCodigo(codigoProducto);
 
-        // Verificar si ya existe el mismo producto en esta venta
-        for (DetalleVenta& d : detalles) {
-            if (d.getCodigoProducto() == codigoProducto) {
-                int nuevaCant = d.getCantidad() + cantidad;
-                if (nuevaCant > p->getStock())
-                    throw StockInsuficienteException(p->getStock(), nuevaCant);
-                // Reemplazar detalle con nueva cantidad
-                detalles.erase(std::remove_if(detalles.begin(), detalles.end(),
-                    [codigoProducto](const DetalleVenta& x){
-                        return x.getCodigoProducto() == codigoProducto;
-                    }), detalles.end());
-                detalles.emplace_back(codigoProducto, p->getNombre(), nuevaCant, p->getPrecio());
+        if (cantidad > producto->obtenerStock())
+        {
+            throw StockInsuficienteException(
+                "Stock insuficiente para realizar la venta."
+            );
+        }
+
+        for (DetalleVenta& detalle : detalles)
+        {
+            if (detalle.obtenerCodigoProducto() == codigoProducto)
+            {
+                double totalTemporal =
+                    calcularTotal()
+                    - detalle.obtenerSubtotal()
+                    + ((detalle.obtenerCantidad() + cantidad)
+                        * producto->obtenerPrecio());
+
+                validarTotalMaximo(totalTemporal);
+
+                detalle.aumentarCantidad(
+                    cantidad,
+                    producto->obtenerStock()
+                );
+
                 return;
             }
         }
-        detalles.emplace_back(codigoProducto, p->getNombre(), cantidad, p->getPrecio());
+
+        validarLimiteItems();
+
+        DetalleVenta nuevoDetalle(
+            producto->obtenerCodigo(),
+            producto->obtenerNombre(),
+            cantidad,
+            producto->obtenerPrecio()
+        );
+
+        double totalTemporal =
+            calcularTotal() + nuevoDetalle.obtenerSubtotal();
+
+        validarTotalMaximo(totalTemporal);
+
+        detalles.push_back(nuevoDetalle);
     }
 
-    // Confirmar: descuenta stock real
-    void confirmar(Inventario& inv) {
-        if (finalizada)
-            throw VentaException("La venta ya fue confirmada");
-        if (detalles.empty())
-            throw VentaVaciaException();
+    void confirmar(Inventario& inventario)
+    {
+        validarNoFinalizada();
 
-        // Verificar stock de todos antes de descontar ninguno (atomicidad)
-        for (const DetalleVenta& d : detalles) {
-            Producto* p = inv.buscarPorCodigo(d.getCodigoProducto());
-            if (d.getCantidad() > p->getStock())
-                throw StockInsuficienteException(p->getStock(), d.getCantidad());
+        if (detalles.empty())
+        {
+            throw VentaVaciaException(
+                "No se puede confirmar una venta vacia."
+            );
         }
-        // Descontar
-        for (const DetalleVenta& d : detalles)
-            inv.descontarStock(d.getCodigoProducto(), d.getCantidad());
+
+        for (const DetalleVenta& detalle : detalles)
+        {
+            Producto* producto =
+                inventario.buscarPorCodigo(
+                    detalle.obtenerCodigoProducto()
+                );
+
+            if (detalle.obtenerCantidad() >
+                producto->obtenerStock())
+            {
+                throw StockInsuficienteException(
+                    "Stock insuficiente al confirmar la venta."
+                );
+            }
+        }
+
+        for (const DetalleVenta& detalle : detalles)
+        {
+            inventario.descontarStock(
+                detalle.obtenerCodigoProducto(),
+                detalle.obtenerCantidad()
+            );
+        }
 
         finalizada = true;
     }
 
-    // ── Calculos ─────────────────────────────────────────────
-    // Sobrecarga de operator+ para sumar detalles de forma funcional
-    double calcularTotal() const {
+    double calcularTotal() const
+    {
         double total = 0.0;
-        for (const DetalleVenta& d : detalles)
-            total = d + total;   // usa el operator+ de DetalleVenta
+
+        for (const DetalleVenta& detalle : detalles)
+        {
+            total += detalle.obtenerSubtotal();
+        }
+
         return total;
     }
 
-    // Sobrecarga: sumar dos ventas = suma de totales
-    double operator+(const Venta& otra) const {
-        return calcularTotal() + otra.calcularTotal();
+    int obtenerId() const
+    {
+        return id;
     }
 
-    // ── Getters ──────────────────────────────────────────────
-    int         getId()        const { return id;         }
-    const std::string& getFecha()     const { return fecha;    }
-    const std::string& getHora()      const { return hora;     }
-    const std::string& getVendedor()  const { return vendedor; }
-    bool        estaFinalizada() const { return finalizada; }
-    int         cantidadItems() const { return static_cast<int>(detalles.size()); }
-    const std::vector<DetalleVenta>& getDetalles() const { return detalles; }
-
-    static int getSiguienteId() { return siguienteId; }
-
-    // ── Impresion ────────────────────────────────────────────
-    void imprimirTicket() const {
-        std::cout << "\n========================================\n";
-        std::cout << "         TIENDA - TICKET DE VENTA\n";
-        std::cout << "========================================\n";
-        std::cout << "Venta #" << id << "   " << fecha << " " << hora << "\n";
-        std::cout << "Vendedor: " << vendedor << "\n";
-        std::cout << "----------------------------------------\n";
-        for (const DetalleVenta& d : detalles)
-            std::cout << d << "\n";
-        std::cout << "----------------------------------------\n";
-        std::cout << std::right << std::setw(40)
-                  << "TOTAL: S/ " << std::fixed << std::setprecision(2) << calcularTotal() << "\n";
-        std::cout << "========================================\n\n";
+    string obtenerFecha() const
+    {
+        return fecha;
     }
 
-    friend std::ostream& operator<<(std::ostream& os, const Venta& v) {
-        os << "Venta #" << std::setw(4) << v.id
-           << "  " << v.fecha << " " << v.hora
-           << "  Vendedor: " << std::setw(15) << v.vendedor
-           << "  Items: " << std::setw(3) << v.detalles.size()
-           << "  Total: S/ " << std::fixed << std::setprecision(2) << v.calcularTotal();
-        return os;
+    string obtenerHora() const
+    {
+        return hora;
+    }
+
+    string obtenerVendedor() const
+    {
+        return vendedor;
+    }
+
+    bool estaFinalizada() const
+    {
+        return finalizada;
+    }
+
+    int obtenerCantidadItems() const
+    {
+        return static_cast<int>(detalles.size());
+    }
+
+    vector<DetalleVenta> obtenerDetalles() const
+    {
+        return detalles;
     }
 };
+//==================================================
+// REGISTRO DE VENTAS
+// Guarda el historial de ventas confirmadas
+//==================================================
 
-inline int Venta::siguienteId = 1;
+class RegistroVentas
+{
+private:
+
+    vector<Venta> ventas;
+
+public:
+
+    RegistroVentas()
+    {
+    }
+
+    ~RegistroVentas()
+    {
+    }
+
+    void registrarVenta(const Venta& venta)
+    {
+        if (!venta.estaFinalizada())
+        {
+            throw VentaException(
+                "Solo se pueden registrar ventas finalizadas."
+            );
+        }
+
+        ventas.push_back(venta);
+    }
+
+    vector<Venta> obtenerVentas() const
+    {
+        return ventas;
+    }
+
+    int obtenerCantidadVentas() const
+    {
+        return static_cast<int>(ventas.size());
+    }
+
+    bool estaVacio() const
+    {
+        return ventas.empty();
+    }
+
+    double calcularTotalVentas() const
+    {
+        double total = 0.0;
+
+        for (const Venta& venta : ventas)
+        {
+            total += venta.calcularTotal();
+        }
+
+        return total;
+    }
+
+    vector<Venta> obtenerVentasPorFecha(const string& fecha) const
+    {
+        vector<Venta> resultado;
+
+        for (const Venta& venta : ventas)
+        {
+            if (venta.obtenerFecha() == fecha)
+            {
+                resultado.push_back(venta);
+            }
+        }
+
+        return resultado;
+    }
+
+    double calcularTotalPorFecha(const string& fecha) const
+    {
+        double total = 0.0;
+
+        for (const Venta& venta : ventas)
+        {
+            if (venta.obtenerFecha() == fecha)
+            {
+                total += venta.calcularTotal();
+            }
+        }
+
+        return total;
+    }
+
+    Venta obtenerVentaPorId(int id) const
+    {
+        for (const Venta& venta : ventas)
+        {
+            if (venta.obtenerId() == id)
+            {
+                return venta;
+            }
+        }
+
+        throw VentaException(
+            "No existe una venta con el ID indicado."
+        );
+    }
+
+    vector<Venta> obtenerUltimasVentas(int cantidad) const
+    {
+        ValidadorProducto::validarCantidad(cantidad);
+
+        vector<Venta> resultado;
+
+        int totalVentas = static_cast<int>(ventas.size());
+        int inicio = totalVentas - cantidad;
+
+        if (inicio < 0)
+        {
+            inicio = 0;
+        }
+
+        for (int i = inicio; i < totalVentas; i++)
+        {
+            resultado.push_back(ventas[i]);
+        }
+
+        return resultado;
+    }
+};
