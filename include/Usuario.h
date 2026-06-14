@@ -1,246 +1,315 @@
 #pragma once
+
 #include <string>
-#include <iostream>
-#include <algorithm>
-#include <functional>
-#include "Excepciones.h"
-#include "Validador.h"
-
-// ============================================================
-//  Usuario  — clase base abstracta
-//  Herencia + encapsulamiento + miembros protected
-// ============================================================
-class Usuario {
-protected:
-    int         id;
-    std::string nombre;
-    std::string usuario;
-    std::string contrasena;     // en prod. se guardaria el hash
-    bool        activo;
-
-    static int siguienteId;
-
-    // Hash simple (XOR + acumulacion). En produccion: bcrypt/SHA-256
-    static std::string hashSimple(const std::string& s) {
-        unsigned long h = 5381;
-        for (char c : s)
-            h = ((h << 5) + h) ^ static_cast<unsigned char>(c);
-        return std::to_string(h);
-    }
-
-    static void validarUsuario(const std::string& u) {
-        if (u.size() < 4 || u.size() > 20)
-            throw ValidacionException("El usuario debe tener entre 4 y 20 caracteres");
-        for (char c : u)
-            if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_')
-                throw ValidacionException("El usuario solo puede contener letras, numeros y '_'");
-    }
-
-    static void validarContrasena(const std::string& p) {
-        if (p.size() < 6)
-            throw ValidacionException("La contrasena debe tener al menos 6 caracteres");
-        if (p.size() > 50)
-            throw ValidacionException("La contrasena no puede superar 50 caracteres");
-        bool tieneNum = false, tieneLetra = false;
-        for (char c : p) {
-            if (std::isdigit(static_cast<unsigned char>(c))) tieneNum   = true;
-            if (std::isalpha(static_cast<unsigned char>(c))) tieneLetra = true;
-        }
-        if (!tieneNum || !tieneLetra)
-            throw ValidacionException("La contrasena debe contener letras y numeros");
-    }
-
-public:
-    Usuario(const std::string& nombre, const std::string& usuario,
-            const std::string& contrasena)
-        : id(siguienteId++), activo(true) {
-        ValidadorProducto::validarNombre(nombre);
-        validarUsuario(usuario);
-        validarContrasena(contrasena);
-
-        this->nombre     = ValidadorProducto::trim(nombre);
-        this->usuario    = usuario;
-        this->contrasena = hashSimple(contrasena);   // guardar hash
-    }
-
-    // Constructor para cargar desde BD (contrasena ya hasheada)
-    Usuario(int id, const std::string& nombre, const std::string& usuario,
-            const std::string& hashContrasena, bool activo)
-        : id(id), nombre(nombre), usuario(usuario),
-          contrasena(hashContrasena), activo(activo) {
-        if (id >= siguienteId) siguienteId = id + 1;
-    }
-
-    virtual ~Usuario() = default;
-
-    // ── Autenticacion ────────────────────────────────────────
-    bool verificarContrasena(const std::string& intento) const {
-        return contrasena == hashSimple(intento);
-    }
-
-    // ── Interfaz abstracta ───────────────────────────────────
-    virtual std::string getRol()          const = 0;
-    virtual bool        puedeEliminar()   const = 0;
-    virtual bool        puedeVerReportes()const = 0;
-
-    // ── Getters ──────────────────────────────────────────────
-    int                getId()      const { return id;      }
-    const std::string& getNombre()  const { return nombre;  }
-    const std::string& getUsuario() const { return usuario; }
-    bool               estaActivo() const { return activo;  }
-
-    void desactivar() { activo = false; }
-    void activar()    { activo = true;  }
-
-    void cambiarContrasena(const std::string& actual, const std::string& nueva) {
-        if (!verificarContrasena(actual))
-            throw ContrasenaIncorrectaException();
-        validarContrasena(nueva);
-        contrasena = hashSimple(nueva);
-        std::cout << "  Contrasena actualizada correctamente.\n";
-    }
-
-    friend std::ostream& operator<<(std::ostream& os, const Usuario& u) {
-        os << "[" << u.id << "] " << std::left << std::setw(20) << u.nombre
-           << " @" << std::setw(15) << u.usuario
-           << " Rol: " << u.getRol()
-           << (u.activo ? "" : " [INACTIVO]");
-        return os;
-    }
-};
-
-inline int Usuario::siguienteId = 1;
-
-// ============================================================
-//  Administrador : public Usuario
-// ============================================================
-class Administrador : public Usuario {
-public:
-    Administrador(const std::string& nombre, const std::string& usuario,
-                  const std::string& contrasena)
-        : Usuario(nombre, usuario, contrasena) {}
-
-    Administrador(int id, const std::string& nombre, const std::string& usuario,
-                  const std::string& hash, bool activo)
-        : Usuario(id, nombre, usuario, hash, activo) {}
-
-    std::string getRol()           const override { return "Administrador"; }
-    bool        puedeEliminar()    const override { return true;  }
-    bool        puedeVerReportes() const override { return true;  }
-};
-
-// ============================================================
-//  Empleado : public Usuario
-// ============================================================
-class Empleado : public Usuario {
-private:
-    std::string turno;   // "Manana", "Tarde", "Noche"
-
-public:
-    Empleado(const std::string& nombre, const std::string& usuario,
-             const std::string& contrasena, const std::string& turno = "Manana")
-        : Usuario(nombre, usuario, contrasena) {
-        if (turno != "Manana" && turno != "Tarde" && turno != "Noche")
-            throw ValidacionException("Turno invalido. Use: Manana, Tarde o Noche");
-        this->turno = turno;
-    }
-
-    Empleado(int id, const std::string& nombre, const std::string& usuario,
-             const std::string& hash, bool activo, const std::string& turno)
-        : Usuario(id, nombre, usuario, hash, activo), turno(turno) {}
-
-    std::string getRol()           const override { return "Empleado"; }
-    bool        puedeEliminar()    const override { return false; }
-    bool        puedeVerReportes() const override { return false; }
-    const std::string& getTurno()  const { return turno; }
-};
-
-// ============================================================
-//  SistemaLogin  — maneja sesion activa
-// ============================================================
-#include <memory>
 #include <vector>
 
-class SistemaLogin {
-private:
-    std::vector<std::unique_ptr<Usuario>> usuarios;
-    Usuario* usuarioActual = nullptr;
+#include "Validador.h"
+#include "Excepciones.h"
 
-    static constexpr int MAX_INTENTOS = 3;
+using namespace std;
+
+//==================================================
+// CLASE BASE USUARIO
+//==================================================
+
+class Usuario
+{
+protected:
+
+    inline static int siguienteId = 1;
+
+    int id;
+    string nombreUsuario;
+    string clave;
+    string nombreCompleto;
+    bool activo;
+
+    void validarNombreUsuario(const string& usuario) const
+    {
+        string limpio = ValidadorProducto::trim(usuario);
+
+        if (limpio.empty())
+        {
+            throw ExcepcionValidacion(
+                "El nombre de usuario no puede estar vacio."
+            );
+        }
+
+        if (limpio.size() < 4)
+        {
+            throw ExcepcionValidacion(
+                "El nombre de usuario debe tener al menos 4 caracteres."
+            );
+        }
+
+        if (limpio.size() > 20)
+        {
+            throw ExcepcionValidacion(
+                "El nombre de usuario no puede superar 20 caracteres."
+            );
+        }
+    }
+
+    void validarClave(const string& claveUsuario) const
+    {
+        if (claveUsuario.empty())
+        {
+            throw ExcepcionValidacion(
+                "La clave no puede estar vacia."
+            );
+        }
+
+        if (claveUsuario.size() < 4)
+        {
+            throw ExcepcionValidacion(
+                "La clave debe tener al menos 4 caracteres."
+            );
+        }
+
+        if (claveUsuario.size() > 30)
+        {
+            throw ExcepcionValidacion(
+                "La clave no puede superar 30 caracteres."
+            );
+        }
+    }
 
 public:
-    SistemaLogin() {
-        // Crear administrador por defecto
-        usuarios.push_back(
-            std::make_unique<Administrador>("Administrador", "admin", "admin123"));
+
+    Usuario(
+        const string& usuario,
+        const string& claveUsuario,
+        const string& nombre
+    )
+    {
+        string usuarioLimpio = ValidadorProducto::trim(usuario);
+        string nombreLimpio = ValidadorProducto::normalizarNombre(nombre);
+
+        validarNombreUsuario(usuarioLimpio);
+        validarClave(claveUsuario);
+        ValidadorProducto::validarNombre(nombreLimpio);
+
+        id = siguienteId++;
+        nombreUsuario = usuarioLimpio;
+        clave = claveUsuario;
+        nombreCompleto = nombreLimpio;
+        activo = true;
     }
 
-    void agregarUsuario(std::unique_ptr<Usuario> u) {
-        // Verificar que el nombre de usuario no exista
-        for (const auto& existente : usuarios)
-            if (existente->getUsuario() == u->getUsuario())
-                throw ValidacionException("El nombre de usuario ya existe: " + u->getUsuario());
-        usuarios.push_back(std::move(u));
+    virtual string obtenerRol() const = 0;
+
+    virtual bool puedeGestionarUsuarios() const = 0;
+
+    int obtenerId() const
+    {
+        return id;
     }
 
-    // Intenta login; lanza excepcion con detalle correcto
-    Usuario* iniciarSesion(const std::string& nombreUsuario,
-                            const std::string& contrasena) {
-        // Buscar usuario
-        for (const auto& u : usuarios) {
-            if (u->getUsuario() == nombreUsuario) {
-                if (!u->estaActivo())
-                    throw AutenticacionException("La cuenta esta desactivada");
-                if (!u->verificarContrasena(contrasena))
-                    throw ContrasenaIncorrectaException();
-                usuarioActual = u.get();
-                return usuarioActual;
+    string obtenerNombreUsuario() const
+    {
+        return nombreUsuario;
+    }
+
+    string obtenerNombreCompleto() const
+    {
+        return nombreCompleto;
+    }
+
+    bool estaActivo() const
+    {
+        return activo;
+    }
+
+    void activar()
+    {
+        activo = true;
+    }
+
+    void desactivar()
+    {
+        activo = false;
+    }
+
+    bool validarAcceso(const string& usuario, const string& claveUsuario) const
+    {
+        return activo &&
+               nombreUsuario == usuario &&
+               clave == claveUsuario;
+    }
+
+    virtual ~Usuario()
+    {
+    }
+};
+
+//==================================================
+// ADMINISTRADOR
+//==================================================
+
+class Administrador : public Usuario
+{
+public:
+
+    Administrador(
+        const string& usuario,
+        const string& claveUsuario,
+        const string& nombre
+    )
+        : Usuario(usuario, claveUsuario, nombre)
+    {
+    }
+
+    string obtenerRol() const override
+    {
+        return "ADMINISTRADOR";
+    }
+
+    bool puedeGestionarUsuarios() const override
+    {
+        return true;
+    }
+};
+
+//==================================================
+// EMPLEADO
+//==================================================
+
+class Empleado : public Usuario
+{
+public:
+
+    Empleado(
+        const string& usuario,
+        const string& claveUsuario,
+        const string& nombre
+    )
+        : Usuario(usuario, claveUsuario, nombre)
+    {
+    }
+
+    string obtenerRol() const override
+    {
+        return "EMPLEADO";
+    }
+
+    bool puedeGestionarUsuarios() const override
+    {
+        return false;
+    }
+};
+
+//==================================================
+// GESTOR DE USUARIOS
+//==================================================
+
+class GestorUsuarios
+{
+private:
+
+    vector<Administrador> administradores;
+    vector<Empleado> empleados;
+
+    bool existeUsuario(const string& usuario) const
+    {
+        for (const Administrador& admin : administradores)
+        {
+            if (admin.obtenerNombreUsuario() == usuario)
+            {
+                return true;
             }
         }
-        throw UsuarioNoEncontradoException(nombreUsuario);
-    }
 
-    // Login interactivo con limite de intentos
-    Usuario* loginInteractivo() {
-        int intentos = 0;
-        while (intentos < MAX_INTENTOS) {
-            try {
-                std::string usr = EntradaSegura::leerTexto("  Usuario   : ", 1, 20);
-                std::string pwd = EntradaSegura::leerTexto("  Contrasena: ", 1, 50);
-                return iniciarSesion(usr, pwd);
-            } catch (const UsuarioNoEncontradoException& e) {
-                ++intentos;
-                std::cout << "  [!] " << e.what()
-                          << " (" << (MAX_INTENTOS - intentos) << " intento(s) restante(s))\n";
-            } catch (const ContrasenaIncorrectaException& e) {
-                ++intentos;
-                std::cout << "  [!] " << e.what()
-                          << " (" << (MAX_INTENTOS - intentos) << " intento(s) restante(s))\n";
-            } catch (const AutenticacionException& e) {
-                throw; // Cuenta desactivada: no reintentar
-            } catch (const EntradaInvalidaException& e) {
-                std::cout << "  [!] " << e.what() << "\n";
+        for (const Empleado& empleado : empleados)
+        {
+            if (empleado.obtenerNombreUsuario() == usuario)
+            {
+                return true;
             }
         }
-        throw AutenticacionException("Demasiados intentos fallidos. Acceso bloqueado.");
+
+        return false;
     }
 
-    void cerrarSesion() {
-        usuarioActual = nullptr;
-        std::cout << "  Sesion cerrada.\n";
+public:
+
+    void registrarAdministrador(
+        const string& usuario,
+        const string& clave,
+        const string& nombre
+    )
+    {
+        string usuarioLimpio = ValidadorProducto::trim(usuario);
+
+        if (existeUsuario(usuarioLimpio))
+        {
+            throw ExcepcionValidacion(
+                "Ya existe un usuario con ese nombre de usuario."
+            );
+        }
+
+        Administrador nuevoAdministrador(usuarioLimpio, clave, nombre);
+        administradores.push_back(nuevoAdministrador);
     }
 
-    Usuario* getUsuarioActual() const {
-        if (!usuarioActual)
-            throw SesionNoIniciadaException();
-        return usuarioActual;
+    void registrarEmpleado(
+        const string& usuario,
+        const string& clave,
+        const string& nombre
+    )
+    {
+        string usuarioLimpio = ValidadorProducto::trim(usuario);
+
+        if (existeUsuario(usuarioLimpio))
+        {
+            throw ExcepcionValidacion(
+                "Ya existe un usuario con ese nombre de usuario."
+            );
+        }
+
+        Empleado nuevoEmpleado(usuarioLimpio, clave, nombre);
+        empleados.push_back(nuevoEmpleado);
     }
 
-    bool haySesion() const { return usuarioActual != nullptr; }
+    Usuario* iniciarSesion(
+        const string& usuario,
+        const string& clave
+    )
+    {
+        for (Administrador& admin : administradores)
+        {
+            if (admin.validarAcceso(usuario, clave))
+            {
+                return &admin;
+            }
+        }
 
-    void listarUsuarios() const {
-        std::cout << "\n  USUARIOS DEL SISTEMA\n  " << std::string(50, '-') << "\n";
-        for (const auto& u : usuarios)
-            std::cout << "  " << *u << "\n";
+        for (Empleado& empleado : empleados)
+        {
+            if (empleado.validarAcceso(usuario, clave))
+            {
+                return &empleado;
+            }
+        }
+
+        throw ExcepcionValidacion(
+            "Usuario o clave incorrectos."
+        );
+    }
+
+    int cantidadUsuarios() const
+    {
+        return static_cast<int>(
+            administradores.size() + empleados.size()
+        );
+    }
+
+    vector<Administrador> obtenerAdministradores() const
+    {
+        return administradores;
+    }
+
+    vector<Empleado> obtenerEmpleados() const
+    {
+        return empleados;
     }
 };
